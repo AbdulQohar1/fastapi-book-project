@@ -1,4 +1,4 @@
-name: Deploy to Heroku
+name: Deploy to AWS EC2
 
 on:
   push:
@@ -12,14 +12,90 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Login to Heroku
-        uses: akhileshns/heroku-deploy@v3.12.14
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-          heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
-          heroku_email: ${{ secrets.HEROKU_EMAIL }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Deploy to Heroku
-              run: |
-                git push https://heroku:${{ secrets.HEROKU_API_KEY }}@git.heroku.com/${{ secrets.HEROKU_APP_NAME }}.git HEAD:main 
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to EC2
+        run: |
+          ssh ubuntu@${{ secrets.EC2_HOST }} '
+            # Kill existing process if running
+            pid=$(lsof -t -i:8000 || echo "")
+            if [ ! -z "$pid" ]; then
+              kill -9 $pid
+            fi
+            
+            # Update code
+            cd ~/fastapi-book-project || git clone https://github.com/AbdulQohar1/fastapi-book-project.git ~/fastapi-book-project
+            cd ~/fastapi-book-project
+            git pull origin main
+            
+            # Setup virtual environment
+            python3 -m venv venv || true
+            source venv/bin/activate
+            
+            # Install dependencies
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # Start application in background
+            nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
+          '
+
+
+# name: Deploy API
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: '3.12'
+
+#       - name: Install dependencies
+#         run: |
+#           python -m venv venv
+#           source venv/bin/activate
+#           pip install --upgrade pip
+#           pip install -r requirements.txt
+
+#       - name: Deploy to EC2
+#         env:
+#           EC2_HOST: ${{ secrets.EC2_HOST }}
+#           EC2_USER: ${{ secrets.EC2_USER }}
+#           EC2_KEY: ${{ secrets.EC2_KEY }}
+#         run: |
+#           # Copy files to the EC2 instance
+#           scp -o StrictHostKeyChecking=no -i $EC2_KEY -r . $EC2_USER@$EC2_HOST:~/fastapi-app
+
+#           # SSH into the EC2 instance and deploy the application
+#           ssh -o StrictHostKeyChecking=no -i $EC2_KEY $EC2_USER@$EC2_HOST << 'EOF'
+#           cd ~/fastapi-app
+#           python3 -m venv venv
+#           source venv/bin/activate
+#           pip install -r requirements.txt
+#           sudo systemctl restart nginx
+#           EOF
+
+
               
