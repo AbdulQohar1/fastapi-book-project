@@ -1,56 +1,104 @@
-name: Deploy to AWS EC2
-
+name: Deploy
 on:
   push:
     branches:
       - main
-
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Setup SSH key
+          python-version: "3.12"
+      - name: Install dependencies
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Deploy to EC2
+          python -m venv venv
+          source venv/bin/activate
+          pip install -r requirements.txt
+      - name: Run tests
         run: |
-          ssh ubuntu@${{ secrets.EC2_HOST }} '
-            # Kill existing process if running
-            pid=$(lsof -t -i:8000 || echo "")
-            if [ ! -z "$pid" ]; then
-              kill -9 $pid
-            fi
-            
-            # Update code
-            cd ~/fastapi-book-project || git clone https://github.com/AbdulQohar1/fastapi-book-project.git ~/fastapi-book-project
-            cd ~/fastapi-book-project
+          source venv/bin/activate
+          pytest
+  deploy:
+    needs: test  # The deploy job will only run if 'test' passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/fastapi-book-project2
             git pull origin main
-            
-            # Setup virtual environment
-            python3 -m venv venv || true
+            git reset --hard origin/main
             source venv/bin/activate
-            
-            # Install dependencies
-            pip install --upgrade pip
             pip install -r requirements.txt
+            sudo systemctl restart fastapi
+            sudo systemctl restart nginx
+
+
+
+
+# name: Deploy to AWS EC2
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# jobs:
+#   deploy:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ secrets.AWS_REGION }}
+
+#       - name: Setup SSH key
+#         run: |
+#           mkdir -p ~/.ssh
+#           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+#           chmod 600 ~/.ssh/id_rsa
+#           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+#       - name: Deploy to EC2
+#         run: |
+#           ssh ubuntu@${{ secrets.EC2_HOST }} '
+#             # Kill existing process if running
+#             pid=$(lsof -t -i:8000 || echo "")
+#             if [ ! -z "$pid" ]; then
+#               kill -9 $pid
+#             fi
             
-            # Start application in background
-            nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
-          '
+#             # Update code
+#             cd ~/fastapi-book-project || git clone https://github.com/AbdulQohar1/fastapi-book-project.git ~/fastapi-book-project
+#             cd ~/fastapi-book-project
+#             git pull origin main
+            
+#             # Setup virtual environment
+#             python3 -m venv venv || true
+#             source venv/bin/activate
+            
+#             # Install dependencies
+#             pip install --upgrade pip
+#             pip install -r requirements.txt
+            
+#             # Start application in background
+#             nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
+#           '
 
 
 # name: Deploy API
